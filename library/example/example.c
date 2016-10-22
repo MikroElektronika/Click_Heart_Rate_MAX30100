@@ -139,35 +139,7 @@ void update_progress_bar ( int x )
 /******************************************************************************
 * Searching max
 *******************************************************************************/
-uint16_t avr_forward ( const uint16_t *pos )
-{
-    uint16_t average=0;
-    uint32_t sum=0;
-    uint16_t const *ptr = pos;
-    int i;
-    for(i=1; i<=FORWARD; i++)
-    {
-        sum += *(ptr+GAP+i);
-    }
-    sum /= FORWARD;
-    average = sum;
-    return average;
-}
 
-uint16_t avr_backward ( const uint16_t *pos )
-{
-    uint16_t average=0;
-    uint32_t sum=0;
-    uint16_t const *ptr = pos; // ptr = pos
-    int i;
-    for(i=1; i<=BACKWARD; i++)
-    {
-        sum += *(ptr-GAP-i);
-    }
-    sum /= BACKWARD;
-    average = sum;
-    return average;
-}
 
 /*******************************************************************************
 * System init
@@ -196,6 +168,7 @@ static void system_init()
 * ir_buff, red_buff - Raw values from LED diodes
 * ir_average, red_average - averaged values
 * cnt_samples - samples counter
+* After sampling for 15 seconds, data will be sent through UART to MikroPlot
 *******************************************************************************/
 void main()
 {
@@ -270,107 +243,9 @@ void main()
         if( j >= SAMPLES) break;
     }
     clear_area( 20, 115 );
-    TFT_Write_Text( "Your results:", 20, 115 );
     update_progress_bar ( 269 );
-//------------------------------------------------------------------------------
-// Signal correction
-//------------------------------------------------------------------------------
-   /*
-   for (cnt = 30; cnt < SAMPLES-1; cnt++)
-   {
 
-       if( ir_buffer[cnt] < 30000 )
-           ir_buffer[cnt] = ir_buffer[cnt-3];
-       if( red_buffer[cnt] < 25000 )
-           red_buffer[cnt] = red_buffer[cnt-3];
-
-
-       if((ir_buffer[cnt-1]-ir_buffer[cnt] > 5000) && (ir_buffer[cnt+1]-ir_buffer[cnt] > 5000))
-       {
-           ir_buffer[cnt] = (ir_buffer[cnt-3]/2)+(ir_buffer[cnt+3]/2);
-       }
-       if((red_buffer[cnt-3]-red_buffer[cnt] > 5000) && (red_buffer[cnt+3]-red_buffer[cnt] > 5000))
-       {
-           red_buffer[cnt] = (red_buffer[cnt-3]/2)+(red_buffer[cnt+3]/2);
-       }
-
-
-   }
-   */
-//------------------------------------------------------------------------------
-// Moving average
-//------------------------------------------------------------------------------
-    /*
-    // Moving average 1
-    for( cnt = 30; cnt < SAMPLES ; cnt++ )
-    {
-        sum = 0;
-        for( counter = cnt; counter >= cnt-5; counter-- )
-        {
-            sum += ir_buffer[counter];
-        }
-        sum/=6;
-        red_buffer[cnt] = sum;
-    }
-    */
-    /*
-for(cnt = 12; cnt < SAMPLES ; cnt++)
-{
-    sum = 0;
-    for(cnt = cnt; cnt >= cnt-7; cnt--)
-    {
-        sum += ir_buffer[cnt];
-    }
-    sum /= 10;
-    ir_buffer[cnt] = sum;
-}
-    */
-//------------------------------------------------------------------------------
-// Searching max
-//------------------------------------------------------------------------------
-
-for(cnt = 15; cnt < SAMPLES-12; cnt++)
-{
-    max_fl = 1;
-    for(i = cnt-15; (i<=cnt+15) && max_fl ;i++)
-    {
-        if(ir_buffer[cnt] < ir_buffer[cnt]) max_fl = 0;
-    }
-    if(max_fl) heart_beat++; //maks[heart_beat++] = ir_buffer[cnt];
-}
-
-    /*
-    // UART output
-    UART_Write_Text("Moving average\r\n");
-    for(cnt = 0; cnt < SAMPLES ;cnt++)
-    {
-        WordToStr(ir_buffer[cnt],ir_screen);
-        UART1_Write_Text(ir_screen);
-        UART1_Write(13);
-        UART1_Write(10);
-    }
-    */
-
-//------------------------------------------------------------------------------
-// Searching max IR LED
-//------------------------------------------------------------------------------
-   /*
-   for (cnt = 20; cnt < SAMPLES-20; cnt++)
-   {
-       //av  = avr_3_buff( ir_buffer[cnt] );
-       av  = ir_buffer[cnt];
-       avb = avr_backward( ir_buffer[cnt] );
-       avf = avr_forward( ir_buffer[cnt] );
-       if(  (av > avb) && (av > avf))
-       {
-           //maximum[heart_beat]=ir_buffer[cnt]+1000;
-           ir_buffer[cnt]+=3000;
-           heart_beat++;
-           cnt+=GAP_AFTER;
-       }
-   }
-   */
-   // UART output
+   // Data is sent to MikroPlot application
    for(cnt = 0; cnt < SAMPLES ;cnt++)
    {
        WordToStr(ir_buffer[cnt],ir_screen);
@@ -379,27 +254,5 @@ for(cnt = 15; cnt < SAMPLES-12; cnt++)
        UART1_Write(10);
    }
 
-//------------------------------------------------------------------------------
-// FFT
-//------------------------------------------------------------------------------
 
-
-//------------------------------------------------------------------------------
-// Final results heart rate
-//------------------------------------------------------------------------------
-    heart_beat*=(3000/SAMPLES);
-    if ( heart_beat > 89 ) heart_beat = 76;
-    else if ( heart_beat < 54 ) heart_beat = 58;
-    WordToStr(heart_beat, hb_screen);
-
-//------------------------------------------------------------------------------
-// Final results SpO2
-//------------------------------------------------------------------------------
-    sp_val=118-(36*sp_val);
-    if (sp_val>99) sp_val = 98;
-    else if (sp_val<94) sp_val = 96;
-    FloatToStr(sp_val, sp_screen);
-    display_bpm_spo2();
-    delay_ms(10000);
-    //SetActiveScreen();
 }
