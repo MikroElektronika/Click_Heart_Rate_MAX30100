@@ -5,40 +5,24 @@
 
 #include "heartrate1_hw.h"
 #include "resources.h"
+#include <stdbool.h>
 
 #define DataIsReady()     ( dataReady == 0 )
 #define DataIsNotReady()  ( dataReady != 0 )
-#define SAMPLES  750
-#define FORWARD    6
-#define BACKWARD   8
-#define GAP        0
-#define GAP_AFTER 11
 
-char ir_screen[16], red_screen[16], hb_screen[16], sp_screen[16], process[16];
-char text[16],temp_screen[16];
-uint16_t temp_value;
-int cnt_samples, cnt;
-uint16_t ir_buffer[1000], red_buffer[1000];
-
-/*******************************************************************************
-* TFT init
-*******************************************************************************/
-// TFT module connections
-unsigned int TFT_DataPort at GPIOE_ODR;
-sbit TFT_RST at GPIOE_ODR.B8;
-sbit TFT_RS at GPIOE_ODR.B12;
-sbit TFT_CS at GPIOE_ODR.B15;
-sbit TFT_RD at GPIOE_ODR.B10;
-sbit TFT_WR at GPIOE_ODR.B11;
-sbit TFT_BLED at GPIOE_ODR.B9;
-// End TFT module connections
 
 sbit dataReady at GPIOD_IDR.B10;
 
-// Resources
-char const extern Arial_Black24x33_Regular[], Arial_Black27x38_Regular[],
-                  Arial_Black64x90_Regular[], Tahoma19x23_Regular[],
-                  active_jpg[6823], idle_red_jpg[6089];
+void InitTimer2(){
+  RCC_APB1ENR.TIM2EN = 1;
+  TIM2_CR1.CEN = 0;
+  TIM2_PSC = 1;
+  TIM2_ARR = 35999;
+  NVIC_IntEnable(IVT_INT_TIM2);
+  TIM2_DIER.UIE = 1;
+  TIM2_CR1.CEN = 1;
+}
+
 
 static void display_init()
 {
@@ -61,15 +45,10 @@ static void display_init()
 
 static void values_init()
 {
-
     TFT_Write_Text( "Values from the sensor", 20, 55 );
     TFT_Write_Text( "IR:", 20, 70 );
     TFT_Write_Text( "RED:", 20, 85 );
     TFT_Write_Text( "Place finger on the sensor!", 20, 115 );
-    TFT_Write_Text( "BPM:", 20, 130 );
-    TFT_Write_Text( "SPO2:", 20, 145 );
-    TFT_Write_Text( "Progress:", 20, 175 );
-    TFT_Write_Text( "%", 115, 175 );
 }
 
 static void clear_ir_red( unsigned int startX, unsigned int startY )
@@ -85,10 +64,11 @@ static void clear_area( unsigned int startX, unsigned int startY )
 }
 
 //------------------------------------------------------------------------------
-// IR and RED values from the sensor
+// Display IR and RED values from the sensor
 //------------------------------------------------------------------------------
-static void display_ir_red(uint16_t ir_val, uint16_t red_val) //[from ADC]
+static void display_ir_red(uint16_t ir_val, uint16_t red_val)
 {
+    char ir_screen[20], red_screen[16];
     TFT_Set_Pen( CL_Black, 1 );
     WordToStr( ir_val, ir_screen );
     clear_ir_red( 80, 70 );
@@ -98,48 +78,6 @@ static void display_ir_red(uint16_t ir_val, uint16_t red_val) //[from ADC]
     TFT_Set_Pen( CL_Black, 1 );
     TFT_Write_Text( red_screen, 80, 85 );
 }
-
-//------------------------------------------------------------------------------
-// BPM and SPO2 values
-//------------------------------------------------------------------------------
-static void display_bpm_spo2()    //[ Algorithm ]
-{
-    //FloatToStr( hb_screen, text );
-    clear_area( 76, 130 );
-    TFT_Set_Pen( CL_Black, 1 );
-    TFT_Write_Text( hb_screen, 76, 130 );
-    //FloatToStr( sp_screen, text );
-    clear_area( 80, 145 );
-    TFT_Write_Text( sp_screen, 80, 145 );
-}
-
-//------------------------------------------------------------------------------
-// Samples
-//------------------------------------------------------------------------------
-static void display_samples(int j)
-{
-    IntToStr( j, temp_screen );
-    clear_area( 85, 175 );
-    TFT_Write_Text( temp_screen, 85, 175 );
-    TFT_Write_Text( "%", 115, 175 );
-}
-
-//------------------------------------------------------------------------------
-// Progress bar
-//------------------------------------------------------------------------------
-void update_progress_bar ( int x )
-{
-    TFT_Set_Pen(CL_BLACK, 1);
-    TFT_Set_Brush(1, CL_BLACK, 0, 0, 0, 0);
-    TFT_Rectangle(20+x, 200, 31+x, 210);
-    TFT_Set_Pen(CL_WHITE, 1);
-    TFT_Set_Brush(1, CL_WHITE, 0, 0, 0, 0);
-}
-
-/******************************************************************************
-* Searching max
-*******************************************************************************/
-
 
 /*******************************************************************************
 * System init
@@ -152,107 +90,94 @@ static void system_init()
     display_init();
     hr_init( MAX30100_I2C_ADR );
     Delay_ms( 100 );
-    UART1_Init(115200);
+    UART1_Init(57600);
 }
-
-/*******************************************************************************
-* FFT
-*******************************************************************************/
-
 
 /*******************************************************************************
 * Main program
 ********************************************************************************
 * sample_num -  number of read samples
-* temp_value -  raw value from the temperature sensor
 * ir_buff, red_buff - Raw values from LED diodes
 * ir_average, red_average - averaged values
-* cnt_samples - samples counter
-* After sampling for 15 seconds, data will be sent through UART to MikroPlot
+* Data is sent through UART to MikroPlot
 *******************************************************************************/
+
+    static uint32_t miliseconds_counter = 0;
+
 void main()
 {
-    uint8_t maximum[100], p1=0;
-    uint16_t j = 0;
-    uint16_t ir_average;
-    uint16_t red_average;
-    int i, num, counter, sum, max, heart_beat=0, av, avb, avf, x=0, max_fl;
-    int procentage = 0, processed;
-    float sp_val,temp;
-    char sample_num;
-    unsigned long ir_buff[16]  = {0},
-                  red_buff[16] = {0};
+   uint16_t ir_average;
+   uint16_t red_average;
+   char ir_string[20], red_string[20], time_string[20];
+   uint16_t temp_buffer_ctr;
+   uint8_t sample_num;
+   unsigned long ir_buff[16]  = {0}, red_buff[16] = {0};
+   static bool first_measurement, measurement_continues;
 
    system_init();
    values_init();
+   first_measurement = true;
+   measurement_continues = false;
 
    while ( 1 )
    {
         if ( DataIsReady() && (( hr_get_status() & 0x20 ) != 0) )
         {
-           // Read IR and RED sensor data and store it in ir_buff and red_buff
-           sample_num = hr_read_diodes( ir_buff, red_buff );
+
+           sample_num = hr_read_diodes( ir_buff, red_buff );               // Read IR and RED sensor data and store it in ir_buff and red_buff
            if ( sample_num >= 1 )
            {
                 ir_average = 0;
                 red_average = 0;
-                for ( i = 0; i < sample_num; i++ )
+                for ( temp_buffer_ctr = 0; temp_buffer_ctr < sample_num; temp_buffer_ctr++ )
                 {
-                    ir_average += ir_buff[i];
-                    red_average += red_buff[i];
+                    ir_average += ir_buff[temp_buffer_ctr];
+                    red_average += red_buff[temp_buffer_ctr];
                 }
-                ir_average  /= sample_num;
+                ir_average  /= sample_num;                                         // calculate the average value for this reading
                 red_average /= sample_num;
-                display_ir_red( ir_average, red_average );
+                display_ir_red( ir_average, red_average );                         // display the calculated averages on the TFT display
 
                 if(ir_average > 10000 )
                 {
-                    if (j == 1)
+                    if (measurement_continues == false && first_measurement == false)
+                    {
+                       measurement_continues = true;
+                       clear_area( 20, 115 );
+                       TFT_Write_Text( "Measuring and sending data", 20, 115 );
+                    }
+
+                    if (first_measurement == true)                                 // if this is our first measurement, start the timer to count miliseconds
                     {
                         clear_area( 20, 115 );
-                        TFT_Write_Text( "Please wait for 15 seconds...", 20, 115 );
+                        TFT_Write_Text( "Measuring and sending data", 20, 115 );
+                        InitTimer2();
+                        EnableInterrupts();
+                        Uart1_Write_Text("START\r\n");
+                        first_measurement = false;
                     }
-                    red_buffer[j] = red_average;
-                    ir_buffer[j] = ir_average;
-                    j++;
-                    p1=0;
-                    if( j%30 == 0 )
-                    {
-                        update_progress_bar( x );
-                        x+=11;
-                        if( x%20 == 0 ) x+=1;
-                        display_samples(procentage+=4);
-                    }
+
+                    FloatToStr(ir_average,ir_string);                              // convert HR values and time values to string, and send them to MikroPlot
+                    Floattostr(miliseconds_counter, time_string);
+                    ltrim(time_string);
+                    strcat(ir_string, ",");
+                    strcat(ir_string,time_string);
+                    strcat(ir_string, "\r\n");
+                    UART1_Write_Text(ir_string);
                 }
                 else
                 {
-                    j=0;
-                    x=0;
-                    procentage = 0;
-                    clear_area( 85, 175 );
-                    clear_area( 20, 200 );
-                    if(p1 == 0)
-                    {
                         clear_area( 20, 115 );
                         TFT_Write_Text( "Place finger on the sensor!", 20, 115 );
-                        p1=1;
-                    }
+                        measurement_continues = false;
                 }
             }
         }
-        if( j >= SAMPLES) break;
     }
-    clear_area( 20, 115 );
-    update_progress_bar ( 269 );
+}
 
-   // Data is sent to MikroPlot application
-   for(cnt = 0; cnt < SAMPLES ;cnt++)
-   {
-       WordToStr(ir_buffer[cnt],ir_screen);
-       UART1_Write_Text(ir_screen);
-       UART1_Write(13);
-       UART1_Write(10);
-   }
-
-
+void Timer2_interrupt() iv IVT_INT_TIM2
+{
+  TIM2_SR.UIF = 0;
+  miliseconds_counter++;
 }
