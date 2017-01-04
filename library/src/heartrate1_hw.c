@@ -154,7 +154,7 @@ void hr_heartrate_spo2_data_ready_int_enable(bool enable)
   else
     temp &= ~(1<<4);
 
-  heartrate1_i2c_hal_write(INT_ENABLE, 1, temp);
+  heartrate1_i2c_hal_write(INT_ENABLE, 1, &temp);
 }
 
 uint8_t hr_read_diodes(uint16_t* ir_buff, uint16_t* red_buff)
@@ -173,7 +173,7 @@ uint8_t hr_read_diodes(uint16_t* ir_buff, uint16_t* red_buff)
         {
             // read data
             heartrate1_i2c_hal_read( FIFO_DATA_REG, 4, &samples );
-            
+
             *(ir_buff) =  (uint16_t)samples[1];
             *(ir_buff++) |= (uint16_t)samples[0] << 8;
             *(red_buff) = (uint16_t)samples[3];
@@ -209,10 +209,9 @@ void hr_init( uint8_t slave_address )
     hr_spo2_high_res_enable(true);
     hr_spo2_set_sample_rate(0);
     hr_set_led_pulse_width(3);
-    hr_set_red_current_level(0b00001110);
+    hr_set_red_current_level(0b00001111);
     hr_set_ir_current_level(0b00001110);
-
     hr_heartrate_data_ready_int_enable(true);
     hr_heartrate_spo2_data_ready_int_enable(true);
-    heartrate1_i2c_hal_read( INT_ENABLE, 1, &test );
+    hr_temp_ready_int_enable(true);
 }
